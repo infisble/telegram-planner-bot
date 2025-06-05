@@ -1,104 +1,102 @@
-# bot.py
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-# Заглушка для Render, чтобы он думал, что мы слушаем порт
-
-def run_dummy_server():
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"I'm a bot, not a web server :)")
-
-    server = HTTPServer(('0.0.0.0', 10000), Handler)
-    server.serve_forever()
-
-threading.Thread(target=run_dummy_server, daemon=True).start()
-
-import os
-import urllib.parse
 import asyncio
+import logging
+import os
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.utils import executor
+from aiogram import Bot, Dispatcher, F
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.enums import ParseMode
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Contact
+
+from database import init_db, async_session
+from models import User
+from sqlalchemy.future import select
+from sqlalchemy.exc import NoResultFound
 from dotenv import load_dotenv
 
-from database import User, SessionLocal, init_db
-
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
 
-@dp.message_handler(commands=["start"])
-async def start(msg: types.Message):
-    kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("📱 Поделиться номером", request_contact=True))
-    await msg.answer("Привет! Поделитесь номером телефона для входа:", reply_markup=kb)
+TOKEN = os.getenv("BOT_TOKEN")
 
-@dp.message_handler(content_types=types.ContentType.CONTACT)
-async def contact_handler(msg: types.Message):
-    phone = msg.contact.phone_number
-    user_id = msg.from_user.id
+bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+dp = Dispatcher(storage=MemoryStorage())
 
-    async with SessionLocal() as session:
-        existing_user = await session.get(User, user_id)
-        if not existing_user:
-            new_user = User(telegram_id=user_id, phone=phone)
-            session.add(new_user)
-            await session.commit()
+# --- Reply Keyboards ---
+start_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📞 Поделиться номером", request_contact=True)],
+    ],
+    resize_keyboard=True
+)
 
-    await show_main_menu(msg)
+main_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📝 Заметка"), KeyboardButton(text="⏰ Будильник")],
+        [KeyboardButton(text="📅 Планер"), KeyboardButton(text="👤 Профиль")],
+    ],
+    resize_keyboard=True
+)
 
-async def show_main_menu(msg: types.Message):
-    uid = msg.from_user.id
-    planner_url = f"https://yourdomain.com/planner?uid={uid}"
+# --- Handlers ---
 
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("📝 Заметка", callback_data="note"),
-        InlineKeyboardButton("⏰ Будильник", callback_data="alarm")
-    )
-    kb.add(
-        InlineKeyboardButton("🗕 Планер", url=planner_url),
-        InlineKeyboardButton("👤 Профиль", callback_data="profile")
-    )
-    await msg.answer("Выберите действие:", reply_markup=kb)
+@dp.message(F.text == "/start")
+async def start_handler(message: Message, state: FSMContext):
+    await message.answer("Привет! Поделись номером телефона, чтобы начать ⬇️", reply_markup=start_kb)
 
-@dp.callback_query_handler(lambda c: c.data == "note")
-async def note_callback(call: types.CallbackQuery):
-    url = "shortcuts://run-shortcut?" + urllib.parse.urlencode({
-        "name": "Добавить заметку",
-        "input": "text",
-        "text": "Новая заметка"
-    })
-    await call.message.answer(f"Нажмите для создания заметки:\n{url}")
+@dp.message(F.contact)
+async def contact_handler(message: Message):
+    contact: Contact = message.contact
+    user_id = message.from_user.id
 
-@dp.callback_query_handler(lambda c: c.data == "alarm")
-async def alarm_callback(call: types.CallbackQuery):
-    url = "shortcuts://run-shortcut?" + urllib.parse.urlencode({
-        "name": "Установить будильник",
-        "input": "text",
-        "text": "08:00 | Проснуться"
-    })
-    await call.message.answer(f"Нажмите для установки будильника:\n{url}")
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_id))
+        user = result.scalar_one_or_none()
 
-@dp.callback_query_handler(lambda c: c.data == "profile")
-async def profile_callback(call: types.CallbackQuery):
-    user_id = call.from_user.id
-    async with SessionLocal() as session:
-        user = await session.get(User, user_id)
         if user:
-            text = f"👤 Ваш профиль:\nTelegram ID: {user.telegram_id}\nТелефон: {user.phone}\nУстройств: 1"
+            user.phone = contact.phone_number
         else:
-            text = "Профиль не найден."
-    await call.message.answer(text)
+            user = User(telegram_id=user_id, phone=contact.phone_number)
+            session.add(user)
 
-# Создаём таблицу при запуске
-async def on_startup(dp):
+        await session.commit()
+
+    await message.answer("✅ Телефон получен! Вот главное меню:", reply_markup=main_kb)
+
+@dp.message(F.text == "📝 Заметка")
+async def note_handler(message: Message):
+    await message.answer("Напиши текст заметки (пока это заглушка).")
+
+@dp.message(F.text == "⏰ Будильник")
+async def alarm_handler(message: Message):
+    await message.answer("Укажи время для будильника (заглушка).")
+
+@dp.message(F.text == "📅 Планер")
+async def planner_handler(message: Message):
+    await message.answer("Планер будет доступен в веб-приложении.\n(заглушка на будущее)")
+
+@dp.message(F.text == "👤 Профиль")
+async def profile_handler(message: Message):
+    user_id = message.from_user.id
+
+    async with async_session() as session:
+        result = await session.execute(select(User).where(User.telegram_id == user_id))
+        user = result.scalar_one_or_none()
+
+    if user:
+        await message.answer(
+            f"👤 Профиль:\n\n"
+            f"Telegram ID: <code>{user.telegram_id}</code>\n"
+            f"Телефон: <code>{user.phone}</code>"
+        )
+    else:
+        await message.answer("❌ Пользователь не найден. Сначала отправь свой номер.")
+
+# --- Start bot ---
+async def main():
+    logging.basicConfig(level=logging.INFO)
     await init_db()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    executor.start_polling(dp, on_startup=on_startup)
+    asyncio.run(main())
