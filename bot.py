@@ -1,23 +1,26 @@
 import os
 import urllib.parse
+import asyncio
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils import executor
 from dotenv import load_dotenv
 
 from database import User, SessionLocal, init_db
-import asyncio
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
+
 @dp.message_handler(commands=["start"])
 async def start(msg: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("📱 Поделиться номером", request_contact=True))
     await msg.answer("Привет! Поделитесь номером телефона для входа:", reply_markup=kb)
+
 
 @dp.message_handler(content_types=types.ContentType.CONTACT)
 async def contact_handler(msg: types.Message):
@@ -32,6 +35,7 @@ async def contact_handler(msg: types.Message):
             await session.commit()
 
     await show_main_menu(msg)
+
 
 async def show_main_menu(msg: types.Message):
     uid = msg.from_user.id
@@ -48,6 +52,7 @@ async def show_main_menu(msg: types.Message):
     )
     await msg.answer("Выберите действие:", reply_markup=kb)
 
+
 @dp.callback_query_handler(lambda c: c.data == "note")
 async def note_callback(call: types.CallbackQuery):
     url = "shortcuts://run-shortcut?" + urllib.parse.urlencode({
@@ -57,6 +62,7 @@ async def note_callback(call: types.CallbackQuery):
     })
     await call.message.answer(f"Нажмите для создания заметки:\n{url}")
 
+
 @dp.callback_query_handler(lambda c: c.data == "alarm")
 async def alarm_callback(call: types.CallbackQuery):
     url = "shortcuts://run-shortcut?" + urllib.parse.urlencode({
@@ -65,6 +71,7 @@ async def alarm_callback(call: types.CallbackQuery):
         "text": "08:00 | Проснуться"
     })
     await call.message.answer(f"Нажмите для установки будильника:\n{url}")
+
 
 @dp.callback_query_handler(lambda c: c.data == "profile")
 async def profile_callback(call: types.CallbackQuery):
@@ -77,6 +84,11 @@ async def profile_callback(call: types.CallbackQuery):
             text = "Профиль не найден."
     await call.message.answer(text)
 
+
+# ✅ ВОТ ЗДЕСЬ НАСТОЯЩАЯ МАГИЯ:
+async def on_startup(dp):
+    await init_db()
+
 if __name__ == "__main__":
-    asyncio.run(init_db())
-    executor.start_polling(dp)
+    # УБРАЛ asyncio.run(), вместо этого — init_db() через on_startup
+    executor.start_polling(dp, on_startup=on_startup)
