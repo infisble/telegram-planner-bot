@@ -1,3 +1,21 @@
+# bot.py
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# Заглушка для Render, чтобы он думал, что мы слушаем порт
+
+def run_dummy_server():
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"I'm a bot, not a web server :)")
+
+    server = HTTPServer(('0.0.0.0', 10000), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_dummy_server, daemon=True).start()
+
 import os
 import urllib.parse
 import asyncio
@@ -14,13 +32,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-
 @dp.message_handler(commands=["start"])
 async def start(msg: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add(KeyboardButton("📱 Поделиться номером", request_contact=True))
     await msg.answer("Привет! Поделитесь номером телефона для входа:", reply_markup=kb)
-
 
 @dp.message_handler(content_types=types.ContentType.CONTACT)
 async def contact_handler(msg: types.Message):
@@ -36,7 +52,6 @@ async def contact_handler(msg: types.Message):
 
     await show_main_menu(msg)
 
-
 async def show_main_menu(msg: types.Message):
     uid = msg.from_user.id
     planner_url = f"https://yourdomain.com/planner?uid={uid}"
@@ -47,11 +62,10 @@ async def show_main_menu(msg: types.Message):
         InlineKeyboardButton("⏰ Будильник", callback_data="alarm")
     )
     kb.add(
-        InlineKeyboardButton("📅 Планер", url=planner_url),
+        InlineKeyboardButton("🗕 Планер", url=planner_url),
         InlineKeyboardButton("👤 Профиль", callback_data="profile")
     )
     await msg.answer("Выберите действие:", reply_markup=kb)
-
 
 @dp.callback_query_handler(lambda c: c.data == "note")
 async def note_callback(call: types.CallbackQuery):
@@ -62,7 +76,6 @@ async def note_callback(call: types.CallbackQuery):
     })
     await call.message.answer(f"Нажмите для создания заметки:\n{url}")
 
-
 @dp.callback_query_handler(lambda c: c.data == "alarm")
 async def alarm_callback(call: types.CallbackQuery):
     url = "shortcuts://run-shortcut?" + urllib.parse.urlencode({
@@ -71,7 +84,6 @@ async def alarm_callback(call: types.CallbackQuery):
         "text": "08:00 | Проснуться"
     })
     await call.message.answer(f"Нажмите для установки будильника:\n{url}")
-
 
 @dp.callback_query_handler(lambda c: c.data == "profile")
 async def profile_callback(call: types.CallbackQuery):
@@ -84,11 +96,9 @@ async def profile_callback(call: types.CallbackQuery):
             text = "Профиль не найден."
     await call.message.answer(text)
 
-
-# ✅ ВОТ ЗДЕСЬ НАСТОЯЩАЯ МАГИЯ:
+# Создаём таблицу при запуске
 async def on_startup(dp):
     await init_db()
 
 if __name__ == "__main__":
-    # УБРАЛ asyncio.run(), вместо этого — init_db() через on_startup
     executor.start_polling(dp, on_startup=on_startup)
