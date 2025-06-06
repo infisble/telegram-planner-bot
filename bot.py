@@ -2,11 +2,10 @@ import asyncio
 import logging
 import os
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Contact
-from aiogram.enums import ParseMode
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.utils import executor
+from aiogram.contrib.fsm_storage.memory import MemoryStorage
 
 from sqlalchemy import select
 from dotenv import load_dotenv
@@ -18,11 +17,11 @@ load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set in environment variables")
+    raise RuntimeError("BOT_TOKEN is not set in .env")
 
-# --- Инициализация бота ---
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
-dp = Dispatcher(storage=MemoryStorage())
+bot = Bot(token=TOKEN, parse_mode="HTML")
+storage = MemoryStorage()
+dp = Dispatcher(bot, storage=storage)
 
 # --- Клавиатуры ---
 start_kb = ReplyKeyboardMarkup(
@@ -42,13 +41,12 @@ main_kb = ReplyKeyboardMarkup(
 
 # --- Хендлеры ---
 
-@dp.message(F.text == "/start")
-async def start_handler(message: Message, state: FSMContext):
+@dp.message_handler(commands=['start'])
+async def start_handler(message: types.Message):
     await message.answer("Привет! Поделись номером телефона, чтобы начать ⬇️", reply_markup=start_kb)
 
-
-@dp.message(F.contact)
-async def contact_handler(message: Message):
+@dp.message_handler(content_types=types.ContentType.CONTACT)
+async def contact_handler(message: types.Message):
     contact: Contact = message.contact
     user_id = message.from_user.id
 
@@ -66,23 +64,19 @@ async def contact_handler(message: Message):
 
     await message.answer("✅ Телефон получен! Вот главное меню:", reply_markup=main_kb)
 
-
-@dp.message(F.text == "📝 Заметка")
+@dp.message_handler(lambda m: m.text == "📝 Заметка")
 async def note_handler(message: Message):
-    await message.answer("Напиши текст заметки (заглушка).")
+    await message.answer("Напиши текст заметки (пока это заглушка).")
 
-
-@dp.message(F.text == "⏰ Будильник")
+@dp.message_handler(lambda m: m.text == "⏰ Будильник")
 async def alarm_handler(message: Message):
     await message.answer("Укажи время для будильника (заглушка).")
 
-
-@dp.message(F.text == "📅 Планер")
+@dp.message_handler(lambda m: m.text == "📅 Планер")
 async def planner_handler(message: Message):
     await message.answer("Планер будет доступен в веб-приложении.\n(заглушка на будущее)")
 
-
-@dp.message(F.text == "👤 Профиль")
+@dp.message_handler(lambda m: m.text == "👤 Профиль")
 async def profile_handler(message: Message):
     user_id = message.from_user.id
 
@@ -92,19 +86,19 @@ async def profile_handler(message: Message):
 
     if user:
         await message.answer(
-            f"👤 <b>Профиль</b>:\n\n"
+            f"👤 Профиль:\n\n"
             f"Telegram ID: <code>{user.telegram_id}</code>\n"
             f"Телефон: <code>{user.phone}</code>"
         )
     else:
         await message.answer("❌ Пользователь не найден. Сначала отправь свой номер.")
 
-
 # --- Запуск бота ---
-async def main():
-    logging.basicConfig(level=logging.INFO)
+async def on_startup(_):
     await init_db()
-    await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(init_db())
+    executor.start_polling(dp, skip_updates=True)
