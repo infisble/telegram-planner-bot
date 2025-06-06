@@ -1,29 +1,29 @@
-import asyncio
 import logging
 import os
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Contact
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, Contact
 from aiogram.utils import executor
+from aiogram.dispatcher import FSMContext
+from aiogram.dispatcher.filters.state import State, StatesGroup
 from aiogram.contrib.fsm_storage.memory import MemoryStorage
-
-from sqlalchemy import select
+from sqlalchemy.future import select
+from sqlalchemy.exc import NoResultFound
 from dotenv import load_dotenv
 
-from database import init_db, async_session
+from database import async_session, init_db
 from models import User
 
 load_dotenv()
 
-TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set in .env")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-bot = Bot(token=TOKEN, parse_mode="HTML")
+# --- Bot and Dispatcher ---
+bot = Bot(token=BOT_TOKEN, parse_mode=types.ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(bot, storage=storage)
 
-# --- Клавиатуры ---
+# --- Keyboards ---
 start_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📞 Поделиться номером", request_contact=True)],
@@ -39,14 +39,13 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# --- Хендлеры ---
-
+# --- Handlers ---
 @dp.message_handler(commands=['start'])
-async def start_handler(message: types.Message):
+async def cmd_start(message: types.Message):
     await message.answer("Привет! Поделись номером телефона, чтобы начать ⬇️", reply_markup=start_kb)
 
 @dp.message_handler(content_types=types.ContentType.CONTACT)
-async def contact_handler(message: types.Message):
+async def handle_contact(message: types.Message):
     contact: Contact = message.contact
     user_id = message.from_user.id
 
@@ -64,20 +63,20 @@ async def contact_handler(message: types.Message):
 
     await message.answer("✅ Телефон получен! Вот главное меню:", reply_markup=main_kb)
 
-@dp.message_handler(lambda m: m.text == "📝 Заметка")
-async def note_handler(message: Message):
-    await message.answer("Напиши текст заметки (пока это заглушка).")
+@dp.message_handler(lambda msg: msg.text == "📝 Заметка")
+async def handle_note(message: types.Message):
+    await message.answer("Напиши текст заметки (заглушка).")
 
-@dp.message_handler(lambda m: m.text == "⏰ Будильник")
-async def alarm_handler(message: Message):
+@dp.message_handler(lambda msg: msg.text == "⏰ Будильник")
+async def handle_alarm(message: types.Message):
     await message.answer("Укажи время для будильника (заглушка).")
 
-@dp.message_handler(lambda m: m.text == "📅 Планер")
-async def planner_handler(message: Message):
+@dp.message_handler(lambda msg: msg.text == "📅 Планер")
+async def handle_planner(message: types.Message):
     await message.answer("Планер будет доступен в веб-приложении.\n(заглушка на будущее)")
 
-@dp.message_handler(lambda m: m.text == "👤 Профиль")
-async def profile_handler(message: Message):
+@dp.message_handler(lambda msg: msg.text == "👤 Профиль")
+async def handle_profile(message: types.Message):
     user_id = message.from_user.id
 
     async with async_session() as session:
@@ -93,12 +92,12 @@ async def profile_handler(message: Message):
     else:
         await message.answer("❌ Пользователь не найден. Сначала отправь свой номер.")
 
-# --- Запуск бота ---
+# --- Startup ---
 async def on_startup(_):
     await init_db()
+    await bot.delete_webhook(drop_pending_updates=True)
+    logging.info("Бот запущен!")
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(init_db())
-    executor.start_polling(dp, skip_updates=True)
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
