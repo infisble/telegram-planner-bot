@@ -3,26 +3,28 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, Contact
 from aiogram.enums import ParseMode
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import Contact
+
+from sqlalchemy import select
+from dotenv import load_dotenv
 
 from database import init_db, async_session
 from models import User
-from sqlalchemy.future import select
-from sqlalchemy.exc import NoResultFound
-from dotenv import load_dotenv
 
 load_dotenv()
 
 TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN is not set in environment variables")
 
+# --- Инициализация бота ---
 bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=MemoryStorage())
 
-# --- Reply Keyboards ---
+# --- Клавиатуры ---
 start_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="📞 Поделиться номером", request_contact=True)],
@@ -38,11 +40,12 @@ main_kb = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
-# --- Handlers ---
+# --- Хендлеры ---
 
 @dp.message(F.text == "/start")
 async def start_handler(message: Message, state: FSMContext):
     await message.answer("Привет! Поделись номером телефона, чтобы начать ⬇️", reply_markup=start_kb)
+
 
 @dp.message(F.contact)
 async def contact_handler(message: Message):
@@ -63,17 +66,21 @@ async def contact_handler(message: Message):
 
     await message.answer("✅ Телефон получен! Вот главное меню:", reply_markup=main_kb)
 
+
 @dp.message(F.text == "📝 Заметка")
 async def note_handler(message: Message):
-    await message.answer("Напиши текст заметки (пока это заглушка).")
+    await message.answer("Напиши текст заметки (заглушка).")
+
 
 @dp.message(F.text == "⏰ Будильник")
 async def alarm_handler(message: Message):
     await message.answer("Укажи время для будильника (заглушка).")
 
+
 @dp.message(F.text == "📅 Планер")
 async def planner_handler(message: Message):
     await message.answer("Планер будет доступен в веб-приложении.\n(заглушка на будущее)")
+
 
 @dp.message(F.text == "👤 Профиль")
 async def profile_handler(message: Message):
@@ -85,14 +92,15 @@ async def profile_handler(message: Message):
 
     if user:
         await message.answer(
-            f"👤 Профиль:\n\n"
+            f"👤 <b>Профиль</b>:\n\n"
             f"Telegram ID: <code>{user.telegram_id}</code>\n"
             f"Телефон: <code>{user.phone}</code>"
         )
     else:
         await message.answer("❌ Пользователь не найден. Сначала отправь свой номер.")
 
-# --- Start bot ---
+
+# --- Запуск бота ---
 async def main():
     logging.basicConfig(level=logging.INFO)
     await init_db()
